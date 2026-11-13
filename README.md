@@ -2,6 +2,19 @@
 
 Offline first point of sale app for small shops, built with Flutter. Day 4 of a one app per day reference build series by Partho Sarothi Paik.
 
+Try it in your browser: https://codebypartho.github.io/shop-pos/
+
+## Download the APK
+
+Download the APK from the [v1.0.0 release](https://github.com/CodeByPartho/shop-pos/releases) on GitHub.
+
+## Screenshots
+
+![Products](screenshots/products.png)
+![Cart](screenshots/cart.png)
+![Receipt](screenshots/receipt.png)
+![Daily report](screenshots/report.png)
+
 ## What it does
 
 - **Products:** list of shop products with price and stock. Add a new product (name, price, opening stock, category), search by name, add stock, or delete a product.
