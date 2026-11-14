@@ -1,7 +1,7 @@
 name: shop_pos
 description: "Offline first point of sale app for small shops. Product list, cart, checkout with receipts, sales history and daily reports."
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.1.0+2
 
 environment:
   sdk: ^3.13.7
