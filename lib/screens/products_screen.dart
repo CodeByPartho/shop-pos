@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../models/models.dart';
 import '../state/pos_state.dart';
 import '../utils/format.dart';
+import 'scan_screen.dart';
 
 const List<String> productCategories = [
   'Grocery',
@@ -21,14 +22,31 @@ class ProductsScreen extends StatefulWidget {
 
 class _ProductsScreenState extends State<ProductsScreen> {
   String _query = '';
+  String _categoryFilter = 'All';
+  bool _lowStockOnly = false;
 
   @override
   Widget build(BuildContext context) {
     final state = context.watch<PosState>();
     final query = _query.toLowerCase();
-    final visible = state.products
-        .where((p) => p.name.toLowerCase().contains(query))
-        .toList();
+    final categories = [
+      'All',
+      ...{for (final p in state.products) p.category},
+    ];
+    final visible = state.products.where((p) {
+      if (_categoryFilter != 'All' && p.category != _categoryFilter) {
+        return false;
+      }
+      if (_lowStockOnly && !p.isLowStock) {
+        return false;
+      }
+      if (query.isEmpty) {
+        return true;
+      }
+      return p.name.toLowerCase().contains(query) ||
+          (p.barcode ?? '').toLowerCase().contains(query);
+    }).toList();
+    final lowCount = state.lowStockList.length;
     return Column(
       children: [
         Padding(
@@ -39,24 +57,57 @@ class _ProductsScreenState extends State<ProductsScreen> {
                 child: TextField(
                   decoration: const InputDecoration(
                     prefixIcon: Icon(Icons.search),
-                    hintText: 'Search products',
+                    hintText: 'Search name or barcode',
                     border: OutlineInputBorder(),
                   ),
                   onChanged: (value) => setState(() => _query = value),
                 ),
               ),
               const SizedBox(width: 8),
+              IconButton.filled(
+                icon: const Icon(Icons.qr_code_scanner),
+                tooltip: 'Scan barcode',
+                onPressed: () => _openScanner(context, state),
+              ),
+              const SizedBox(width: 8),
               FilledButton.icon(
-                onPressed: () => _showAddProductDialog(context, state),
+                onPressed: () => _showProductDialog(context, state, null),
                 icon: const Icon(Icons.add),
                 label: const Text('Add'),
               ),
             ],
           ),
         ),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+          child: Row(
+            children: [
+              for (final category in categories)
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: FilterChip(
+                    label: Text(category),
+                    selected: _categoryFilter == category,
+                    onSelected: (_) =>
+                        setState(() => _categoryFilter = category),
+                  ),
+                ),
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: FilterChip(
+                  label: Text('Low stock ($lowCount)'),
+                  selected: _lowStockOnly,
+                  onSelected: (value) =>
+                      setState(() => _lowStockOnly = value),
+                ),
+              ),
+            ],
+          ),
+        ),
         Expanded(
           child: visible.isEmpty
-              ? const Center(child: Text('No products match the search.'))
+              ? const Center(child: Text('No products match.'))
               : ListView.builder(
                   padding: const EdgeInsets.all(12),
                   itemCount: visible.length,
@@ -73,10 +124,39 @@ class _ProductsScreenState extends State<ProductsScreen> {
                             style: const TextStyle(fontWeight: FontWeight.bold),
                           ),
                         ),
-                        title: Text(product.name),
+                        title: Row(
+                          children: [
+                            Expanded(child: Text(product.name)),
+                            if (product.isLowStock)
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .errorContainer,
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Text(
+                                  'Low',
+                                  style: TextStyle(
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onErrorContainer,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
                         subtitle: Text(
                           '${money(product.price)}  |  ${product.category}\n'
-                          'Stock: ${product.stock}',
+                          'Stock: ${product.stock}'
+                          '${product.costPrice > 0 ? '  |  Cost ${money(product.costPrice)}' : ''}'
+                          '${product.barcode == null ? '' : '\nBarcode: ${product.barcode}'}',
                         ),
                         isThreeLine: true,
                         trailing: Row(
@@ -113,6 +193,8 @@ class _ProductsScreenState extends State<ProductsScreen> {
                               onSelected: (choice) {
                                 if (choice == 'restock') {
                                   _showRestockDialog(context, state, product);
+                                } else if (choice == 'edit') {
+                                  _showProductDialog(context, state, product);
                                 } else if (choice == 'delete') {
                                   state.deleteProduct(product.id);
                                 }
@@ -121,6 +203,10 @@ class _ProductsScreenState extends State<ProductsScreen> {
                                 PopupMenuItem(
                                   value: 'restock',
                                   child: Text('Add stock'),
+                                ),
+                                PopupMenuItem(
+                                  value: 'edit',
+                                  child: Text('Edit product'),
                                 ),
                                 PopupMenuItem(
                                   value: 'delete',
@@ -139,65 +225,146 @@ class _ProductsScreenState extends State<ProductsScreen> {
     );
   }
 
-  void _showAddProductDialog(BuildContext context, PosState state) {
-    final nameController = TextEditingController();
-    final priceController = TextEditingController();
-    final stockController = TextEditingController();
-    String category = productCategories.first;
+  Future<void> _openScanner(BuildContext context, PosState state) async {
+    final code = await Navigator.of(context).push<String>(
+      MaterialPageRoute<String>(
+        builder: (_) => const ScanScreen(),
+      ),
+    );
+    if (code == null || !context.mounted) {
+      return;
+    }
+    final added = state.addByBarcode(code);
+    if (!context.mounted) {
+      return;
+    }
+    if (added) {
+      final product = state.findByBarcode(code)!;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Added ${product.name} to the cart.')),
+      );
+    } else if (state.findByBarcode(code) != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('That product is out of stock.'),
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('No product with barcode $code. Add it below.'),
+        ),
+      );
+      _showProductDialog(context, state, null, prefilledBarcode: code);
+    }
+  }
+
+  void _showProductDialog(
+    BuildContext context,
+    PosState state,
+    Product? product, {
+    String? prefilledBarcode,
+  }) {
+    final isEdit = product != null;
+    final nameController = TextEditingController(text: product?.name ?? '');
+    final priceController = TextEditingController(
+      text: product == null ? '' : '${product.price.toInt()}',
+    );
+    final costController = TextEditingController(
+      text: product == null ? '' : '${product.costPrice.toInt()}',
+    );
+    final stockController = TextEditingController(
+      text: product == null ? '' : '${product.stock}',
+    );
+    final barcodeController = TextEditingController(
+      text: product?.barcode ?? prefilledBarcode ?? '',
+    );
+    final lowStockController = TextEditingController(
+      text: '${product?.lowStockAt ?? 5}',
+    );
+    String category = product?.category ?? productCategories.first;
     showDialog<void>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (builderContext, setDialogState) => AlertDialog(
-          title: const Text('Add product'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nameController,
-                decoration: const InputDecoration(
-                  labelText: 'Name',
-                  border: OutlineInputBorder(),
+          title: Text(isEdit ? 'Edit product' : 'Add product'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: nameController,
+                  decoration: const InputDecoration(
+                    labelText: 'Name',
+                    border: OutlineInputBorder(),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: priceController,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
+                const SizedBox(height: 12),
+                TextField(
+                  controller: priceController,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'Selling price (Taka)',
+                    border: OutlineInputBorder(),
+                  ),
                 ),
-                decoration: const InputDecoration(
-                  labelText: 'Price (Taka)',
-                  border: OutlineInputBorder(),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: costController,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'Cost price (Taka, optional)',
+                    border: OutlineInputBorder(),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: stockController,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  labelText: 'Opening stock',
-                  border: OutlineInputBorder(),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: stockController,
+                  keyboardType: TextInputType.number,
+                  decoration: InputDecoration(
+                    labelText: isEdit ? 'Stock' : 'Opening stock',
+                    border: const OutlineInputBorder(),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                initialValue: category,
-                decoration: const InputDecoration(
-                  labelText: 'Category',
-                  border: OutlineInputBorder(),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: barcodeController,
+                  decoration: const InputDecoration(
+                    labelText: 'Barcode (optional)',
+                    border: OutlineInputBorder(),
+                  ),
                 ),
-                items: productCategories
-                    .map(
-                      (c) => DropdownMenuItem(value: c, child: Text(c)),
-                    )
-                    .toList(),
-                onChanged: (value) {
-                  if (value != null) {
-                    setDialogState(() => category = value);
-                  }
-                },
-              ),
-            ],
+                const SizedBox(height: 12),
+                TextField(
+                  controller: lowStockController,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'Warn when stock is at or below',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  initialValue: productCategories.contains(category)
+                      ? category
+                      : 'General',
+                  decoration: const InputDecoration(
+                    labelText: 'Category',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: productCategories
+                      .map(
+                        (c) => DropdownMenuItem(value: c, child: Text(c)),
+                      )
+                      .toList(),
+                  onChanged: (value) {
+                    if (value != null) {
+                      setDialogState(() => category = value);
+                    }
+                  },
+                ),
+              ],
+            ),
           ),
           actions: [
             TextButton(
@@ -208,8 +375,12 @@ class _ProductsScreenState extends State<ProductsScreen> {
               onPressed: () {
                 final name = nameController.text.trim();
                 final price =
-                    double.tryParse(priceController.text.trim()) ?? 0;
+                    int.tryParse(priceController.text.trim()) ?? 0;
+                final cost =
+                    int.tryParse(costController.text.trim()) ?? 0;
                 final stock = int.tryParse(stockController.text.trim()) ?? 0;
+                final lowAt =
+                    int.tryParse(lowStockController.text.trim()) ?? 5;
                 if (name.isEmpty || price <= 0 || stock < 0) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
@@ -220,15 +391,34 @@ class _ProductsScreenState extends State<ProductsScreen> {
                   );
                   return;
                 }
-                state.addProduct(
-                  name: name,
-                  price: price,
-                  stock: stock,
-                  category: category,
-                );
+                final barcode = barcodeController.text.trim().isEmpty
+                    ? null
+                    : barcodeController.text.trim();
+                if (isEdit) {
+                  state.updateProduct(
+                    productId: product.id,
+                    name: name,
+                    price: price.toDouble(),
+                    stock: stock,
+                    category: category,
+                    costPrice: cost.toDouble(),
+                    barcode: barcode,
+                    lowStockAt: lowAt < 0 ? 0 : lowAt,
+                  );
+                } else {
+                  state.addProduct(
+                    name: name,
+                    price: price.toDouble(),
+                    stock: stock,
+                    category: category,
+                    costPrice: cost.toDouble(),
+                    barcode: barcode,
+                    lowStockAt: lowAt < 0 ? 0 : lowAt,
+                  );
+                }
                 Navigator.pop(dialogContext);
               },
-              child: const Text('Save product'),
+              child: Text(isEdit ? 'Save changes' : 'Save product'),
             ),
           ],
         ),

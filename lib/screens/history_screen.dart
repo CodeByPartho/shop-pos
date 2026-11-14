@@ -66,7 +66,11 @@ class HistoryScreen extends StatelessWidget {
                   title: Text(
                     '${sale.items.length} item types, ${sale.itemCount} items',
                   ),
-                  subtitle: Text(timeLabel(sale.dateTime)),
+                  subtitle: Text(
+                    '${timeLabel(sale.dateTime)}  |  '
+                    '${PaymentMethods.label(sale.paymentMethod)}'
+                    '${sale.isCreditSale ? '  |  Due ${money(sale.amountDue)}' : ''}',
+                  ),
                   trailing: Text(
                     money(sale.total),
                     style: const TextStyle(fontWeight: FontWeight.bold),

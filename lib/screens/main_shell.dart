@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../state/pos_state.dart';
 import 'cart_screen.dart';
 import 'history_screen.dart';
+import 'khata_screen.dart';
 import 'products_screen.dart';
 import 'report_screen.dart';
 
@@ -22,22 +23,33 @@ class _MainShellState extends State<MainShell> {
     CartScreen(),
     HistoryScreen(),
     ReportScreen(),
+    KhataScreen(),
   ];
 
   static const List<String> _titles = [
     'ShopPOS',
     'Cart',
     'Sales History',
-    'Daily Report',
+    'Report',
+    'Khata',
   ];
 
   @override
   Widget build(BuildContext context) {
-    final cartCount = context.watch<PosState>().cartCount;
+    final state = context.watch<PosState>();
+    final cartCount = state.cartCount;
+    final lowCount = state.lowStockList.length;
+    final owingCount =
+        state.customers.where((c) => state.balanceOf(c.id) > 0).length;
     return Scaffold(
       appBar: AppBar(
         title: Text(_titles[_index]),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.settings),
+            tooltip: 'Shop settings',
+            onPressed: () => _showSettingsDialog(context, state),
+          ),
           if (_index == 0)
             IconButton(
               icon: const Icon(Icons.restore),
@@ -48,7 +60,7 @@ class _MainShellState extends State<MainShell> {
                   builder: (dialogContext) => AlertDialog(
                     title: const Text('Reset demo data?'),
                     content: const Text(
-                      'This restores the 12 demo products and clears all sales.',
+                      'This restores the 12 demo products and clears all sales, khata, expenses and parked sales.',
                     ),
                     actions: [
                       TextButton(
@@ -74,8 +86,12 @@ class _MainShellState extends State<MainShell> {
         selectedIndex: _index,
         onDestinationSelected: (value) => setState(() => _index = value),
         destinations: [
-          const NavigationDestination(
-            icon: Icon(Icons.store),
+          NavigationDestination(
+            icon: Badge(
+              label: Text('$lowCount'),
+              isLabelVisible: lowCount > 0,
+              child: const Icon(Icons.store),
+            ),
             label: 'Products',
           ),
           NavigationDestination(
@@ -93,6 +109,54 @@ class _MainShellState extends State<MainShell> {
           const NavigationDestination(
             icon: Icon(Icons.bar_chart),
             label: 'Report',
+          ),
+          NavigationDestination(
+            icon: Badge(
+              label: Text('$owingCount'),
+              isLabelVisible: owingCount > 0,
+              child: const Icon(Icons.book),
+            ),
+            label: 'Khata',
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showSettingsDialog(
+    BuildContext context,
+    PosState state,
+  ) async {
+    final taxController = TextEditingController(
+      text: state.taxRatePercent == 0
+          ? ''
+          : state.taxRatePercent.toStringAsFixed(0),
+    );
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Shop settings'),
+        content: TextField(
+          controller: taxController,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(
+            labelText: 'Tax / VAT rate % (0 means tax off)',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final rate =
+                  double.tryParse(taxController.text.trim()) ?? 0;
+              state.setTaxRate(rate);
+              Navigator.pop(dialogContext);
+            },
+            child: const Text('Save'),
           ),
         ],
       ),

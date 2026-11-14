@@ -5,7 +5,7 @@ final NumberFormat taka = NumberFormat.currency(
   decimalDigits: 0,
 );
 
-String money(double value) => taka.format(value);
+String money(num value) => taka.format(value);
 
 String dayLabel(DateTime date) => DateFormat('EEEE, d MMMM yyyy').format(date);
 
