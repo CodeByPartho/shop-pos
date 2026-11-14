@@ -29,7 +29,7 @@ android {
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         // mobile_scanner needs minSdk 23.
-        minSdk = 23
+        minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         // Uses the version code from pubspec.yaml. When using split APKs, 1000 * ABI_VERSION
         // is added automatically by Flutter. (https://developer.android.com/studio/build/configure-apk-splits#configure-APK-versions)
@@ -61,12 +61,58 @@ android {
             }
         }
     }
+
+    packaging {
+        resources {
+            // datastore 1.2.1 ships the same LICENSE.txt in both
+            // datastore-core-okio and datastore-core-okio-jvm; the
+            // classes do not clash, only this resource file does.
+            excludes += "META-INF/androidx/datastore/datastore-core-okio/LICENSE.txt"
+            // Multiplatform jars (collection, okio, ...) all embed the
+            // same Kotlin multiplatform metadata files under their
+            // shared source-set dirs. They are compiler metadata,
+            // unused at Android runtime.
+            excludes += "commonMain/**"
+            excludes += "linuxMain/**"
+            excludes += "nativeMain/**"
+            excludes += "nonJvmMain/**"
+            excludes += "jsMain/**"
+            excludes += "wasmJsMain/**"
+            excludes += "wasmWasiMain/**"
+            excludes += "appleMain/**"
+            excludes += "mingwMain/**"
+            excludes += "iosMain/**"
+            excludes += "macosMain/**"
+            excludes += "tvosMain/**"
+            excludes += "watchosMain/**"
+            excludes += "androidNativeMain/**"
+            excludes += "META-INF/kotlin-project-structure-metadata.json"
+            excludes += "META-INF/**/LICENSE.txt"
+            excludes += "META-INF/**/LICENSE"
+            excludes += "META-INF/**/NOTICE.txt"
+            excludes += "META-INF/**/NOTICE"
+        }
+    }
 }
 
 kotlin {
     compilerOptions {
         jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
     }
+}
+
+// Dependency fix (same as khata-finance and edu-manager v1.1.0):
+// shared_preferences_android pulls in datastore 1.2.1, whose -android
+// AARs and -jvm JARs ship identical classes, failing
+// checkReleaseDuplicateClasses. The -android artifacts are the ones
+// used on Android.
+configurations.all {
+    // collection-ktx 1.1.0 (via fragment-ktx) and collection-jvm 1.4.2
+    // ship the same ArrayMapKt / ArraySetKt / LruCacheKt classes.
+    // collection-jvm already provides them, so dropping ktx is safe.
+    exclude(group = "androidx.collection", module = "collection-ktx")
+    exclude(group = "androidx.datastore", module = "datastore-core-jvm")
+    exclude(group = "androidx.datastore", module = "datastore-preferences-core-jvm")
 }
 
 flutter {
